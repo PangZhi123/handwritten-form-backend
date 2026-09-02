@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 import logging
 import re
@@ -18,7 +19,25 @@ from .service import ConversionService
 
 logger = logging.getLogger("handwritten_form_api")
 settings = Settings.from_env()
-app = FastAPI(title="手写表格电子化算法后端", version="0.1.0")
+
+
+class TerminalSafeJSONResponse(JSONResponse):
+    """Use ASCII JSON escapes so Windows PowerShell never mojibakes UTF-8 text."""
+
+    def render(self, content) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+
+
+app = FastAPI(
+    title="手写表格电子化算法后端",
+    version="0.1.0",
+    default_response_class=TerminalSafeJSONResponse,
+)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_origins),
@@ -50,7 +69,7 @@ async def request_id_middleware(request: Request, call_next):
 @app.exception_handler(BusinessError)
 async def business_error_handler(request: Request, exc: BusinessError):
     logger.warning("requestId=%s code=%s message=%s", request.state.request_id, exc.code, exc.message)
-    return JSONResponse(
+    return TerminalSafeJSONResponse(
         envelope(request.state.request_id, False, exc.code, exc.message), status_code=exc.http_status
     )
 
@@ -64,7 +83,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         business = fail("HF0102")
     else:
         business = fail("HF0103", "请求字段格式或取值不合法")
-    return JSONResponse(
+    return TerminalSafeJSONResponse(
         envelope(request.state.request_id, False, business.code, business.message), status_code=400
     )
 
@@ -72,7 +91,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 @app.exception_handler(Exception)
 async def unhandled_error_handler(request: Request, exc: Exception):
     logger.exception("requestId=%s unhandled error", request.state.request_id, exc_info=exc)
-    return JSONResponse(
+    return TerminalSafeJSONResponse(
         envelope(request.state.request_id, False, "HF0301", "后端处理失败，请根据requestId排查日志"),
         status_code=500,
     )

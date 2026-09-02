@@ -37,7 +37,8 @@ D:/handwritten-form-runtime/        上传文件、结果和元数据
 ## 4. 启动 API
 
 ```powershell
-python -m pip install -e .
+python -m pip install -r .\requirements.txt
+python -m pip install --no-deps -e .
 python -m uvicorn handwritten_form_api.main:app --host 0.0.0.0 --port 8000
 ```
 
@@ -49,4 +50,3 @@ Invoke-RestMethod http://127.0.0.1:8080/v1/models
 ```
 
 服务器防火墙只需向前端测试网络开放 API 端口 `8000`；模型端口 `8080` 保持本机访问。
-

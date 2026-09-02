@@ -24,6 +24,21 @@ class StructureMismatch(RuntimeError):
 
 
 def _json_object(text: str) -> str:
+    decoder = json.JSONDecoder()
+    candidates: list[tuple[int, int, str]] = []
+    for start, character in enumerate(text):
+        if character != "{":
+            continue
+        try:
+            value, length = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            candidates.append((start + length, length, text[start : start + length]))
+    if candidates:
+        # Thinking output may contain prompt examples before the final answer.
+        # Prefer the object ending latest; prefer the outer object on equal ends.
+        return max(candidates, key=lambda item: (item[0], item[1]))[2]
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end < start:
         raise ValueError("响应中没有JSON对象")
@@ -56,15 +71,30 @@ class QwenVlDocumentAnalyzer:
 
     def analyze(self, images: list[np.ndarray], template_schema: dict, language: str) -> list[RecognizedTable]:
         content = [{"type": "image_url", "image_url": {"url": self._image_url(image)}} for image in images]
+        prompt_schema = {
+            "tableCount": template_schema["tableCount"],
+            "tables": [{
+                "tableIndex": table["tableIndex"],
+                "rows": table["rows"],
+                "cols": table["cols"],
+                "cells": [{
+                    "row": cell["row"], "col": cell["col"],
+                    "fixedText": cell["fixedText"],
+                } for cell in table["cells"] if not cell["merged"]],
+            } for table in template_schema["tables"]],
+        }
         prompt = (
             "你将收到按上传顺序排列的手写表格图片，以及Word模板的精确表格结构JSON。"
             "请直接完成表格感知、手写识别和模板单元格映射。图片表格按页码、页面内从上到下/从左到右对应tableIndex。"
             "fixedText非空的是模板固定文字，必须保留，不要作为手写结果返回。"
-            "merged=true是合并单元格重复位置，只在anchorRow/anchorCol返回一次。"
-            "若表格数量或结构与模板明显不匹配，设置structureMatched=false并说明原因；严禁猜测错位填充。"
-            "无法确认的文字允许返回但必须降低confidence；空白单元格text为空字符串。"
+            "rows/cols是Word合并前的内部网格坐标，不是图片中肉眼可数的线条数；合并后视觉行列数较少不代表结构不匹配。"
+            "图片中的工程名称、编号、日期及其他字段值与模板fixedText不同，也不属于结构不匹配。"
+            "只有表单版式或表格数量明显属于另一种表单时才设置structureMatched=false；同类表单必须设置为true。"
+            "只返回结构中列出的有效单元格坐标，不要返回被合并覆盖的位置。"
+            "只返回识别到非空手写内容的单元格；空白单元格必须省略，禁止为所有空白格生成text为空字符串的条目。"
+            "无法确认的文字允许返回但必须降低confidence。"
             f"主要语言：{language}。模板结构："
-            + json.dumps(template_schema, ensure_ascii=False, separators=(",", ":"))
+            + json.dumps(prompt_schema, ensure_ascii=False, separators=(",", ":"))
             + "\n只输出标准JSON："
             '{"structureMatched":true,"mismatchReason":"","tables":['
             '{"tableIndex":0,"rows":2,"cols":3,"cells":['
@@ -72,6 +102,7 @@ class QwenVlDocumentAnalyzer:
         )
         content.append({"type": "text", "text": prompt})
         payload = {"model": self.model, "temperature": 0, "max_tokens": self.max_tokens,
+                   "response_format": {"type": "json_object"},
                    "messages": [{"role": "system", "content": "你是手写表格电子化引擎，只输出JSON。"},
                                 {"role": "user", "content": content}]}
         parse_error: Exception | None = None
@@ -81,7 +112,8 @@ class QwenVlDocumentAnalyzer:
                 result = self._request_with_retry(payload)
                 try:
                     message = result["choices"][0]["message"]
-                    raw = message.get("content") or message.get("reasoning_content") or ""
+                    raw = (message.get("content") or message.get("reasoning_content")
+                           or message.get("reasoning") or "")
                     data = json.loads(_json_object(raw))
                     break
                 except (KeyError, IndexError, TypeError, ValueError, json.JSONDecodeError) as exc:

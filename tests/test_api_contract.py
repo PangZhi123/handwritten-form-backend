@@ -72,4 +72,4 @@ def test_missing_source_uses_document_error_code(tmp_path: Path):
     response = client.post("/api/handwritten-form/v1/convert")
     assert response.status_code == 400
     assert response.json()["code"] == "HF0101"
-
+    assert b"\\u" in response.content

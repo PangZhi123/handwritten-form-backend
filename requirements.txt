@@ -1,9 +1,16 @@
+# API server
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
 python-multipart==0.0.20
+
+# Word document processing
 python-docx==1.2.0
+
+# Image and PDF processing
 opencv-python-headless==4.11.0.86
 numpy==2.2.6
 Pillow==11.3.0
 pypdfium2==4.30.0
+
+# IANA timezone data for Windows and minimal Python environments
 tzdata==2025.2

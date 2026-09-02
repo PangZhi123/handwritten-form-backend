@@ -147,7 +147,7 @@ Invoke-RestMethod http://127.0.0.1:8080/v1/models
 python -m venv D:\python-envs\handwritten-form
 & D:\python-envs\handwritten-form\Scripts\Activate.ps1
 python -m pip install --upgrade pip
-python -m pip install -r .\requirements-lock.txt
+python -m pip install -r .\requirements.txt
 python -m pip install --no-deps -e .
 ```
 

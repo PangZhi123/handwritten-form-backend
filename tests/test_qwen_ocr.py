@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from handwritten_form_api.ocr import QwenVlDocumentAnalyzer
+from handwritten_form_api.ocr import QwenVlDocumentAnalyzer, _json_object
 
 
 class FakeResponse:
@@ -40,6 +40,17 @@ def test_qwen_receives_template_and_all_images_once():
     assert tables[0].cells[0].text == "张三"
     assert called.call_count == 1
     body = json.loads(called.call_args.args[0].data.decode("utf-8"))
+    assert body["response_format"] == {"type": "json_object"}
     image_parts = [part for part in body["messages"][1]["content"] if part["type"] == "image_url"]
     assert len(image_parts) == 2
+    prompt = body["messages"][1]["content"][-1]["text"]
+    assert '"row":0,"col":0,"fixedText":"姓名"' in prompt
+    assert '"merged"' not in prompt
+    assert "空白单元格必须省略" in prompt
 
+
+def test_extracts_last_complete_json_from_ollama_reasoning():
+    reasoning = '先参考示例 {"example": true}，最终结果：' \
+        '{"structureMatched":true,"tables":[]}'
+    extracted = json.loads(_json_object(reasoning))
+    assert extracted == {"structureMatched": True, "tables": []}
