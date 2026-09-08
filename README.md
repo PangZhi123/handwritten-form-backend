@@ -275,6 +275,7 @@ python -m pytest
 ## 其他文档
 
 - `docs/test-server-deployment.md`：测试服务器部署摘要。
+- `docs/testing-4b-deployment.md`：测试环境（4B 模型）部署与启动说明。
 - `docs/frontend-integration.md`：前端接口调用说明。
 - `docs/delivery-package.md`：交付包制作说明。
 - `.env.test-server.example`：测试服务器配置样例。

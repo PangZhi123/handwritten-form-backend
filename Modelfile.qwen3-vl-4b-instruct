@@ -1,0 +1,5 @@
+FROM qwen3-vl:4b-instruct
+
+# The image plus the compacted 24x13 Word schema exceeds Ollama's 4K default.
+PARAMETER num_ctx 32768
+PARAMETER temperature 0
