@@ -54,3 +54,78 @@ def test_extracts_last_complete_json_from_ollama_reasoning():
         '{"structureMatched":true,"tables":[]}'
     extracted = json.loads(_json_object(reasoning))
     assert extracted == {"structureMatched": True, "tables": []}
+
+
+def test_template_dimensions_override_model_dimensions():
+    schema = {"tables": [{"tableIndex": 0, "rows": 11, "cols": 10,
+                           "cells": [{"row": 1, "col": 2, "merged": False}]}]}
+    data = {"tables": [{"tableIndex": 0, "rows": 2, "cols": 3,
+                        "cells": [{"row": 1, "col": 2, "text": "resultFileId"}]}]}
+    table = QwenVlDocumentAnalyzer._parse_tables(data, schema)[0]
+    assert (table.rows, table.cols) == (11, 10)
+    assert table.cells[0].text == "resultFileId"
+
+
+def test_missing_tables_and_split_fragments_keep_template_structure():
+    schema = {"tables": [
+        {"tableIndex": i, "rows": 1, "cols": 2,
+         "cells": [{"row": 0, "col": c, "merged": False} for c in range(2)]}
+        for i in range(2)
+    ]}
+    data = {"tables": [
+        {"tableIndex": 0, "cells": [{"row": 0, "col": 0, "text": "A"}]},
+        {"tableIndex": 0, "cells": [{"row": 0, "col": 1, "text": "B"}]}
+    ]}
+    tables = QwenVlDocumentAnalyzer._parse_tables(data, schema)
+    assert len(tables) == 2
+    assert [cell.text for cell in tables[0].cells] == ["A", "B"]
+    assert tables[1].cells == ()
+
+
+def test_invalid_coordinates_and_conflicting_content_are_rejected():
+    import pytest
+    from handwritten_form_api.ocr import StructureMismatch
+
+    schema = {"tables": [{"tableIndex": 0, "rows": 1, "cols": 1,
+                           "cells": [{"row": 0, "col": 0, "merged": False}]}]}
+    for fragments in [
+        [{"tableIndex": 9, "cells": []}],
+        [{"tableIndex": 0, "cells": [{"row": 1, "col": 0, "text": "X"}]}],
+        [{"tableIndex": 0, "cells": [{"row": 0, "col": 0, "text": text}]}
+         for text in ["A", "B"]],
+    ]:
+        with pytest.raises(StructureMismatch):
+            QwenVlDocumentAnalyzer._parse_tables({"tables": fragments}, schema)
+
+
+def test_new_response_produces_editable_word(tmp_path):
+    from docx import Document
+    from handwritten_form_api.pipeline import ConversionPipeline
+
+    template = tmp_path / "template.docx"
+    source = tmp_path / "source.png"
+    output = tmp_path / "output.docx"
+    document = Document()
+    table = document.add_table(rows=11, cols=10)
+    table.cell(0, 0).text = "序号"
+    document.save(template)
+    from PIL import Image
+    Image.new("RGB", (100, 100), "white").save(source)
+    response = {"choices": [{"message": {"content": json.dumps({"tables": [{
+        "tableIndex": 0, "cells": [{"row": 1, "col": 2,
+        "text": "resultFileId", "confidence": 0.95}]}]})}}]}
+    analyzer = QwenVlDocumentAnalyzer("http://model/v1", "local", "qwen", retries=0)
+    with patch.object(analyzer, "_request_with_retry", return_value=response) as request:
+        result = ConversionPipeline(analyzer).run([source], template, output, "zh-CN", True)
+    prompt = request.call_args.args[0]["messages"][1]["content"][-1]["text"]
+    assert '"rows":11,"cols":10' in prompt
+    assert '"rows":2,"cols":3' not in prompt
+    assert "印刷文字" in prompt
+    assert result["filledCellCount"] == 1
+    reopened = Document(output)
+    assert len(reopened.tables[0].rows) == 11
+    assert reopened.tables[0].cell(0, 0).text == "序号"
+    assert reopened.tables[0].cell(1, 2).text == "resultFileId"
+    reopened.tables[0].cell(1, 2).text = "edited"
+    reopened.save(output)
+    assert Document(output).tables[0].cell(1, 2).text == "edited"
